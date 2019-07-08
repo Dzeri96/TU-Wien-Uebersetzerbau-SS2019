@@ -1,0 +1,115 @@
+%{
+/* vim: filetype=c
+ */
+#define CODE
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+
+#include "tree.h"
+#include "assembler.h"
+%}
+
+%start stat
+%term OP_Not=1 OP_Add=2 OP_Mult=3 OP_Minus=4 OP_Or=5 OP_LarOrEq=6 OP_Eq=7 OP_Address=8 OP_Id=9 OP_Number=10 OP_Return=11 OP_Zero=12 OP_One=13 OP_Expr=14 OP_Call=15 OP_Goto=16 OP_Dot=17 OP_IsList=18 OP_Head=19 OP_Tail=20 OP_Assign=21 OP_Guarded=22 OP_Blank=23
+
+%%
+
+stat:	ret					# 0 #
+stat:	assign					# 0 #
+stat:	guard					# 0 #
+stat:	OP_Blank				# 0 #
+stat:	expr					# 0 #
+
+expr: 	OP_Expr(untagged)			# 1 # pushReg(bnode->child[0]->reg);
+
+guard: OP_Guarded(number)			# 2 # jump(bnode->child[0]->reg, bnode->parameter);
+guard: OP_Guarded(list)				# 2 # jump(bnode->child[0]->reg, bnode->parameter);
+guard: OP_Guarded(immediate)			# 1 # if(bnode->child[0]->value == 0) printf("\tjmp guard_%d\n", bnode->parameter);
+guard: OP_Guarded(OP_Blank)			# 0 # 
+
+ret:	OP_Return(untagged)			# 2 # move(bnode->child[0]->reg, "rax"); retrn();
+
+untagged: OP_Id					# 1 # if(bnode->parameter != -1) move(getParamRegister(bnode->parameter), bnode->reg); else move(getRegByNr(bnode->regIndex), bnode->reg);
+untagged: number				# 1 # /*move(bnode->child[0]->reg, bnode->reg);*/ tagN(bnode->reg);
+untagged: list					# 1 # /*move(bnode->child[0]->reg, bnode->reg);*/ tagL(bnode->reg);
+untagged: OP_Call				# 1 # 
+
+list: untagged					# 3 # checkL(bnode->reg);
+
+number: untagged				# 3 # checkN(bnode->reg);
+number:	immediate				# 1 # movei(bnode->value, bnode->reg);
+
+number:	OP_Not(number)				# 1 # not(bnode->reg);
+untagged: OP_Not(untagged)			# 3 # notUntagged(bnode->reg);
+
+number:	OP_Add(number,number)			# 1 # add(bnode->child[1]->reg, bnode->child[0]->reg);
+number:	OP_Add(immediate,number)		# 2 # addi(bnode->child[0]->value, bnode->child[1]->reg); move(bnode->child[1]->reg, bnode->reg);
+number:	OP_Add(number,immediate)		# 1 # addi(bnode->child[1]->value, bnode->child[0]->reg);
+
+number:	OP_Mult(number,number)			# 1 # mul(bnode->child[1]->reg, bnode->child[0]->reg);
+number:	OP_Mult(immediate,number)		# 1 # muli(bnode->child[0]->value, bnode->child[1]->reg); move(bnode->child[1]->reg, bnode->reg);
+number:	OP_Mult(number,immediate)		# 1 # muli(bnode->child[1]->value, bnode->child[0]->reg);
+
+number:	OP_Or(number,number)			# 2 # or(bnode->child[0]->reg,bnode->child[1]->reg); move(bnode->child[1]->reg, bnode->reg);
+number:	OP_Or(immediate,number)			# 2 # ori(bnode->child[0]->value,bnode->child[1]->reg); move(bnode->child[1]->reg, bnode->reg);
+number:	OP_Or(number,immediate)			# 2 # ori(bnode->child[1]->value,bnode->child[0]->reg); move(bnode->child[0]->reg, bnode->reg);
+untagged: OP_Or(untagged,untagged)		# 6 # orUntagged(bnode->child[0]->reg,bnode->child[1]->reg); move(bnode->child[1]->reg, bnode->reg);
+
+number:	OP_Minus(number,number)			# 1 # minus(bnode->child[1]->reg, bnode->child[0]->reg);
+number:	OP_Minus(immediate,number)		# 2 # movei(bnode->child[0]->value,bnode->reg); minus(bnode->child[1]->reg,bnode->child[0]->reg);
+number: OP_Minus(number,immediate)		# 1 # minusi(bnode->child[0]->reg,bnode->child[1]->value);
+
+number:	OP_LarOrEq(number,number)		# 3 # laroreq(bnode->child[1]->reg, bnode->child[0]->reg, bnode->reg);
+number: OP_LarOrEq(immediate,number)		# 3 # laroreqi2(bnode->child[1]->reg,bnode->child[0]->value, bnode->reg);
+number: OP_LarOrEq(number,immediate)		# 3 # laroreqi(bnode->child[1]->value,bnode->child[0]->reg, bnode->reg);
+
+number:	OP_Eq(number,number)			# 3 # eq(bnode->child[0]->reg, bnode->child[1]->reg, bnode->reg);
+number:	OP_Eq(immediate,number)			# 3 # eqi(bnode->child[0]->value, bnode->child[1]->reg, bnode->reg);
+number:	OP_Eq(number,immediate)			# 3 # eqi(bnode->child[1]->value, bnode->child[0]->reg, bnode->reg);
+number: OP_Eq(number,list)			# 3 # eq(bnode->child[0]->reg, bnode->child[1]->reg, bnode->reg);
+number: OP_Eq(list,number)			# 3 # eq(bnode->child[0]->reg, bnode->child[1]->reg, bnode->reg);
+number: OP_Eq(list,list)			# 3 # eq(bnode->child[0]->reg, bnode->child[1]->reg, bnode->reg);
+number: OP_Eq(untagged, untagged) 		# 3 # eq(bnode->child[0]->reg, bnode->child[1]->reg, bnode->reg);
+
+list:	OP_Dot(untagged, untagged)		# 3 # dotRR(bnode->child[0]->reg, bnode->child[1]->reg, bnode->reg);
+
+number:	OP_IsList(untagged)			# 0 # isList(bnode->child[0]->reg, bnode->reg);
+
+untagged: OP_Head(list)				# 1 # head(bnode->child[0]->reg,bnode->reg);
+untagged: OP_Tail(list)				# 1 # tail(bnode->child[0]->reg,bnode->reg);
+
+immediate:	zero				# 0 # bnode->value = 0;
+immediate:	OP_Not(immediate)		# 0 # bnode->value = bnode->child[0]->value ^ 1;
+immediate:	OP_Add(immediate,immediate)	# 0 # bnode->value = bnode->child[0]->value + bnode->child[1]->value;
+immediate:	OP_Mult(immediate,immediate) 	# 0 # bnode->value = bnode->child[0]->value * bnode->child[1]->value;
+immediate:	OP_Or(immediate,immediate) 	# 0 # bnode->value = bnode->child[0]->value | bnode->child[1]->value;
+immediate:	OP_Minus(immediate,immediate)	# 0 # bnode->value = bnode->child[0]->value - bnode->child[1]->value;
+immediate:	OP_LarOrEq(immediate,immediate) # 0 # bnode->value = (bnode->child[0]->value >= bnode->child[1]->value)? 1 : 0;
+immediate:	OP_Eq(immediate,immediate)	# 0 # bnode->value = (bnode->child[0]->value == bnode->child[1]->value)? 1 : 0;
+immediate:	OP_Number			# 0 #
+immediate:	OP_Zero				# 0 #
+immediate:	OP_One				# 0 #
+immediate: 	OP_IsList(number)		# 0 # bnode->value = 0;
+immediate: 	OP_IsList(list)			# 0 # bnode->value = 1;
+immediate:	OP_IsList(immediate)		# 0 # bnode->value = 0;
+
+assign:		OP_Assign(immediate)		# 2 # movei(bnode->child[0]->value, bnode->parameter != -1? getParamRegister(bnode->parameter) : getRegByNr(bnode->regIndex)); tagN(bnode->parameter != -1? getParamRegister(bnode->parameter) : getRegByNr(bnode->regIndex));
+assign:		OP_Assign(untagged)		# 0 # move(bnode->reg, bnode->parameter != -1? getParamRegister(bnode->parameter) : getRegByNr(bnode->regIndex));
+
+zero:	OP_Zero					# 0 #
+zero:	OP_Mult(zeroexpr,zero) 			# 0 #
+zero:	OP_Mult(zero,zeroexpr) 			# 0 #
+
+zeroexpr:	zero				# 0 #
+zeroexpr:	immediate			# 0 #
+zeroexpr:	OP_Minus(zeroexpr,zeroexpr)	# 0 #
+zeroexpr:	OP_Add(zeroexpr,zeroexpr)	# 0 #
+zeroexpr:	OP_Mult(zeroexpr,zeroexpr)	# 0 #
+zeroexpr:	OP_LarOrEq(zeroexpr, zeroexpr) 	# 0 #
+zeroexpr:	OP_Eq(zeroexpr, zeroexpr) 	# 0 #
+zeroexpr:	OP_Id				# 0 #
+
+%%
+
+
